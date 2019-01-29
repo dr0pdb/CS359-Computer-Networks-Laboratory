@@ -5,11 +5,11 @@ using namespace std;
 class source
 {
 public:
-	int producing_delay, id;
+	double lambda; int id;
 	static int counter;
 
-	source(int producing_delay) {
-		this->producing_delay = producing_delay;
+	source(double lambda) {
+		this->lambda = lambda;
 		this->id = ++counter;
 	}
 };
@@ -25,16 +25,16 @@ public:
 		3 - (packet reached the output port of switch).
 		4 - (Packet reached the destination sink).
 	*/
-	int package_id, timestamp, event_type, source_id;
+	int package_id, event_type;
+	double timestamp;
 
 	/*
 		Events will be sorted by timestamp and then by package_id in the priority queue.
 	*/
-	event(int timestamp, int package_id, int event_type, int source_id) {
+	event(double timestamp, int package_id, int event_type) {
 		this->package_id = package_id;
 		this->timestamp = timestamp;
 		this->event_type = event_type;
-		this->source_id = source_id;
 	}
 };
 
@@ -48,23 +48,23 @@ bool cmp(event a, event other_event) {
 class link
 {
 public:
-	int id, bandwidth, busytill;
+	int id, bandwidth; double busytill;
 	static int counter;
 
 	link(int bandwidth) {
 		this->bandwidth = bandwidth;
 		this->id = ++counter;
-		this->busytill = 0;
+		this->busytill = 0.0;
 	}
 };
 
 class packet
 {
 public:
-	int id, source_id, generation_timestamp;
+	int id, source_id; double generation_timestamp;
 	static int counter;
-	packet(int id, int source_id, int generation_timestamp) {
-		this->id = id;
+	packet(int source_id, double generation_timestamp) {
+		this->id = ++counter;
 		this->source_id = source_id;
 		this->generation_timestamp = generation_timestamp;
 	}
@@ -79,41 +79,40 @@ public:
 	}
 };
 
-int source::counter=0; int link::counter=0; int packet::counter=0;
-int packet_size=200000;
+int source::counter=0; int link::counter=0; int packet::counter=1;
+int packet_size=2000;
 priority_queue<event, vector<event>, std::function<bool(event, event)>> pq(cmp); // priority queue of events.
 vector<packet> packets;
 
-int get_packet_delay(int bandwidth) {
-	return packet_size/bandwidth;
+double get_packet_delay(int bandwidth) {
+	return 1.0*packet_size/bandwidth;
 }
 
-int main() {
-	int limit=25,done=0;
-	link switch_to_sink(50000);
-	vector<source> sources(3, source(1));
-	vector<int> source_bandwidths = {100000, 50000, 200000};
-	vector<link> source_to_switch(3, link(5));
-	packet::counter=3;
-	vector<double> total_time(3, 0.0);
-	int done_counter[3]={0};
+double fRand(double fMin, double fMax)
+{
+    double f = (double)rand() / RAND_MAX;
+    return fMin + f * (fMax - fMin);
+}
 
-	for (int i = 0; i < 3; ++i)
-	{
-		// set source id.
-		sources[i].id=i+1;
-		
-		// different delays for each source.
-		sources[i].producing_delay=i+1;
-		
-		// different bandwidth for each link between source and switch.
-		source_to_switch[i].bandwidth=source_bandwidths[i]; 
-		
-		// Generating the first packet from each of the three sources.
-		event starter(i+1, i+1, 0, i+1);
-		pq.push(starter);
-	}
+double get_next_time(double lambda) {
+	double R = fRand(0.0, 1.0);
+
+	return -log(R)/lambda;
+}
+
+double run_simulation(double lambda) {
+	packets.clear();
+	while(!pq.empty()) pq.pop();
+	source::counter=0; link::counter=0; packet::counter=1;
+	int limit=25,done=0;
+	link source_to_switch(1000), switch_to_sink(500);
+	source src(lambda);
 	network_switch net_switch;
+	double total_time=0.0;
+
+	event starter(1.0, 1, 0);
+
+	pq.push(starter);
 
 	while(done < limit) {
 		event current_event = pq.top(); pq.pop();
@@ -122,27 +121,23 @@ int main() {
 				/*
 					A packet has been generated, schedule it to move to the input port of switch.
 				*/
-				packets.push_back(packet(current_event.package_id, current_event.source_id, current_event.timestamp));
-				event source_to_switch_event(current_event.timestamp, current_event.package_id, 1, current_event.source_id);
+				packets.push_back(packet(0, current_event.timestamp));
+				event source_to_switch_event(current_event.timestamp, current_event.package_id, 1);
 				pq.push(source_to_switch_event);
 
 				/* 
 					Generate the next packet from the source.
 				*/
-				event next_generation_event(
-					current_event.timestamp + sources[current_event.source_id-1].producing_delay, 
-					++packet::counter,
-					0,
-					current_event.source_id);
+				event next_generation_event(current_event.timestamp + get_next_time(src.lambda), packet::counter, 0);
 				pq.push(next_generation_event);
 				break;
 			}
 			case 1: {
-				if(source_to_switch[current_event.source_id-1].busytill > current_event.timestamp) {
+				if(source_to_switch.busytill > current_event.timestamp) {
 					/*
 						Another packet is using this link, so again schedule this event with time when the link is available.
 					*/
-					event source_to_switch_event(source_to_switch[current_event.source_id-1].busytill, current_event.package_id, 1, current_event.source_id);
+					event source_to_switch_event(source_to_switch.busytill, current_event.package_id, 1);
 					pq.push(source_to_switch_event);
 				} else {
 					/*
@@ -150,13 +145,12 @@ int main() {
 						Update the busytill of the link.
 					*/
 					event packet_reaches_input_port_switch(
-						current_event.timestamp + get_packet_delay(source_to_switch[current_event.source_id-1].bandwidth), 
+						current_event.timestamp + get_packet_delay(source_to_switch.bandwidth), 
 						current_event.package_id,
-					 	2,
-					 	current_event.source_id
+					 	2
 					);
-					source_to_switch[current_event.source_id-1].busytill = current_event.timestamp + 
-						get_packet_delay(source_to_switch[current_event.source_id-1].bandwidth);
+					source_to_switch.busytill = current_event.timestamp + 
+						get_packet_delay(source_to_switch.bandwidth);
 					pq.push(packet_reaches_input_port_switch);
 				}
 				break;
@@ -169,8 +163,7 @@ int main() {
 					event packet_reaches_input_port_switch(
 						net_switch.busytill, 
 						current_event.package_id,
-					 	2,
-					 	current_event.source_id
+					 	2
 					);
 					pq.push(packet_reaches_input_port_switch);
 				} else {
@@ -180,8 +173,7 @@ int main() {
 					event packet_reaches_output_port_switch(
 						current_event.timestamp + 0,
 						current_event.package_id,
-						3,
-						current_event.source_id
+						3
 					);
 					pq.push(packet_reaches_output_port_switch);
 					net_switch.busytill=packet_reaches_output_port_switch.timestamp;
@@ -192,10 +184,7 @@ int main() {
 					/*
 						Another packet is using this link, so again schedule this event with time when the link is available.
 					*/
-					event switch_to_sink_event(switch_to_sink.busytill,
-						current_event.package_id,
-						3,
-						current_event.source_id);
+					event switch_to_sink_event(switch_to_sink.busytill, current_event.package_id, 3);
 					pq.push(switch_to_sink_event);
 				} else {
 					/*
@@ -203,10 +192,9 @@ int main() {
 						Update the busytill of the link.
 					*/
 					event packet_reaches_sink(
-						current_event.timestamp, 
+						current_event.timestamp + get_packet_delay(switch_to_sink.bandwidth), 
 						current_event.package_id,
-					 	4,
-					 	current_event.source_id
+					 	4
 					);
 					switch_to_sink.busytill = current_event.timestamp + get_packet_delay(switch_to_sink.bandwidth);
 					pq.push(packet_reaches_sink);
@@ -215,19 +203,24 @@ int main() {
 			}
 			default: {
 				done++;
-				cout<<"Packet id: "<<current_event.package_id
-					<<", Source_id: "<<current_event.source_id
-					<<", Start time: "<<packets[current_event.package_id-1].generation_timestamp
-					<<", End time: "<<current_event.timestamp<<endl;
-				done_counter[current_event.source_id-1]++;
-				total_time[current_event.source_id-1]+=(current_event.timestamp-packets[current_event.package_id-1].generation_timestamp);
+				// cout<<"Packet id: "<<current_event.package_id
+				// 	<<" Start time: "<<packets[current_event.package_id-1].generation_timestamp
+				// 	<<" End time: "<<current_event.timestamp<<endl;
+				total_time += (current_event.timestamp - packets[current_event.package_id-1].generation_timestamp);
 			}
 		}
 	}
+	// printf("The average delay for 50 packets with production delay of %d seconds is %.3f seconds\n", sending_rate, total_time/50.0);
+	return 1.0*total_time/limit;
+}
 
-	printf("The average delay for Source 1 producing %d packets is %.3f\n", done_counter[0],total_time[0]/done_counter[0]);
-	printf("The average delay for Source 2 producing %d packets is %.3f\n", done_counter[1],total_time[1]/done_counter[1]);
-	printf("The average delay for Source 3 producing %d packets is %.3f\n", done_counter[2],total_time[2]/done_counter[2]);
+int main() {
+	
+	printf("Lambda(a[i]),Average delay\n");
+	for (double i = 0.1; i <= 10; i+=0.1)
+	{
+		printf("%f,%.3f\n", i, run_simulation(i));
+	}
 
     return 0;
 }/*
