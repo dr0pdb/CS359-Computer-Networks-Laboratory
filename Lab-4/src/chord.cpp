@@ -262,6 +262,7 @@ int main() {
 	Node* n0 = new Node(1, "127.09.34.112", "8000");
 	Node* n1 = new Node(5, "123.22.24.23", "8458");
 	Node* n2 = new Node(31, "231.239.67.255", "4532");
+	Node* n3 = new Node(16, "231.249.17.245", "4512");
 	n0 -> print_ip_id();
 	n1 -> print_ip_id();
 	n2 -> print_ip_id();
@@ -311,6 +312,14 @@ int main() {
 	n1->fingertable->printFingerTable(n1->predecessor->id);
 	n2->fingertable->printFingerTable(n2->predecessor->id);
 	cout << "\n\n";
+
+	n3->join(n2);
+	cout<<"\nn3 joins the network\n";
+	n0->fingertable->printFingerTable(n0->predecessor->id);
+	n1->fingertable->printFingerTable(n1->predecessor->id);
+	n2->fingertable->printFingerTable(n2->predecessor->id);
+	n3->fingertable->printFingerTable(n3->predecessor->id);
+
 
 	// Random search for values on non-local nodes i.e nodes that may/may not contain the
 	// keys being searched for, locally on them
